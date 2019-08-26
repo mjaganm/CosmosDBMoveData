@@ -82,7 +82,7 @@ namespace CosmosDBMoveData
 
             if (Constants.pkRangeIdList != null)
             {
-                Parallel.ForEach(Constants.pkRangeIdList, new ParallelOptions { MaxDegreeOfParallelism = Constants.LogicalProcessors },
+                Parallel.ForEach(Constants.pkRangeIdList, new ParallelOptions { MaxDegreeOfParallelism = Constants.DegreeOfParallelism },
                     pkRange =>
                     {
                         CallbackProcessEachPartition(pkRange);
@@ -90,7 +90,7 @@ namespace CosmosDBMoveData
             }
             else
             {
-                Parallel.ForEach(partitionKeyRanges, new ParallelOptions { MaxDegreeOfParallelism = Constants.LogicalProcessors },
+                Parallel.ForEach(partitionKeyRanges, new ParallelOptions { MaxDegreeOfParallelism = Constants.DegreeOfParallelism },
                     pkRange =>
                     {
                         CallbackProcessEachPartition(pkRange.Id);
@@ -176,25 +176,48 @@ namespace CosmosDBMoveData
         /// <returns></returns>
         public async Task<bool> UploadToDestCollectionAsync(Document changedDocument)
         {
-            bool uploadedDocument = false;
+            bool operationCompleted = false;
             int numOfAttempts = 1;
 
-            while (uploadedDocument == false && numOfAttempts <= 5)
+            while (operationCompleted == false && numOfAttempts <= Constants.NumOfRetries)
             {
                 try
                 {
                     await DestClient.UpsertDocumentAsync(Constants.DestCollectionUri, changedDocument);
-                    uploadedDocument = true;
+
+                    return true;
                 }
                 catch (DocumentClientException dex)
                 {
-                    Console.WriteLine("Exception trying to upload Document: {0}. Exception: {1}", changedDocument.Id, dex);
-                }
+                    if ((int)dex.StatusCode != 429 && (int)dex.StatusCode != 400)
+                    {
+                        Console.WriteLine("Unhandled Exception trying to upload DocumentId: {0}. Exception: {1}", changedDocument.Id, dex);
+                        throw;
+                    }
 
-                numOfAttempts++;
+                    RunExponentialBackoff(numOfAttempts);
+                    numOfAttempts++;
+                }
             }
 
-            return uploadedDocument;
+            return false;
+        }
+
+        /// <summary>
+        /// Runs Exponential Backoff using the current number of attempts made.
+        /// </summary>
+        /// <param name="numOfAttempts">number of attempts.</param>
+        public void RunExponentialBackoff(int numOfAttempts)
+        {
+            // Ceiling for Exponential backoff
+            if (numOfAttempts > Constants.MaxAttemptsForExponentialBackoff)
+            {
+                numOfAttempts = Constants.MaxAttemptsForExponentialBackoff;
+            }
+
+            int waitTimeInMilliSeconds = (int)Math.Pow(2, numOfAttempts) * 100;
+            Console.WriteLine("Exponential backoff: Retrying after Waiting for {0} milliseconds", waitTimeInMilliSeconds);
+            Thread.Sleep(waitTimeInMilliSeconds);
         }
     }
 }

@@ -38,6 +38,10 @@ namespace CosmosDBMoveData
             DestDatabaseName,
             DestCollectionName);
 
-        public static int LogicalProcessors = Environment.ProcessorCount;
+        public static readonly int DegreeOfParallelism = 3 * Environment.ProcessorCount;
+
+        public static readonly int NumOfRetries = 10;
+
+        public static readonly int MaxAttemptsForExponentialBackoff = 12;
     }
 }
